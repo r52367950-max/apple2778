@@ -1,199 +1,397 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-type Testimonial = { quote: string; name: string; role: string };
+type Point = { x: number; y: number };
+type Direction = "up" | "down" | "left" | "right";
+type Mode = "classic" | "wrap";
+type Difficulty = "easy" | "normal" | "hard";
 
-const reportCards = [
-  { title: "增长总览", desc: "30秒内自动汇总渠道投放、LTV 与漏斗转化。" },
-  { title: "异常预警", desc: "发现异常峰值并给出可执行修复建议。" },
-  { title: "团队日报", desc: "按角色生成可读摘要，自动推送到 Slack/邮箱。" },
-  { title: "董事会简报", desc: "一键生成高管视角图文报告与关键结论。" }
-];
+type GameStatus = "ready" | "running" | "paused" | "gameover";
 
-const integrations = ["Slack", "Notion", "HubSpot", "Google Ads", "Stripe", "Snowflake"];
+type Food = {
+  position: Point;
+  kind: "normal" | "bonus";
+  expiresAt?: number;
+};
 
-const testimonials: Testimonial[] = [
-  { quote: "我们每周节省了 8 小时做报表的时间。", name: "Luna", role: "Growth Lead @ Sailor" },
-  { quote: "跨团队对齐速度明显提升，老板终于能看懂数据。", name: "Ming", role: "COO @ NovaBridge" },
-  { quote: "从数据到行动建议几乎是实时的，执行效率提高很多。", name: "Jasper", role: "Marketing Director @ Helio" }
-];
+const BOARD_SIZE = 24;
+const BONUS_FOOD_CHANCE = 0.18;
+const BONUS_FOOD_LIFETIME_MS = 5500;
+const BASE_POINTS = 10;
+const BONUS_POINTS = 35;
+const LEVEL_UP_STEP = 5;
 
-const faq = [
-  { q: "支持接入私有数据仓库吗？", a: "支持，提供只读连接器与权限隔离策略。" },
-  { q: "是否有团队协作功能？", a: "有，支持评论、@提醒、角色权限和版本历史。" },
-  { q: "价格是否可定制？", a: "企业版可按席位与数据量定制，欢迎联系销售。" }
-];
+const DIRECTION_STEP: Record<Direction, Point> = {
+  up: { x: 0, y: -1 },
+  down: { x: 0, y: 1 },
+  left: { x: -1, y: 0 },
+  right: { x: 1, y: 0 }
+};
 
-export default function HomePage() {
-  const [isYearly, setIsYearly] = useState(false);
-  const [slide, setSlide] = useState(0);
-  const integrationRef = useRef<(HTMLDivElement | null)[]>([]);
+const OPPOSITE_DIRECTION: Record<Direction, Direction> = {
+  up: "down",
+  down: "up",
+  left: "right",
+  right: "left"
+};
+
+const TICK_BY_DIFFICULTY: Record<Difficulty, number> = {
+  easy: 155,
+  normal: 125,
+  hard: 95
+};
+
+const DIFFICULTY_LABEL: Record<Difficulty, string> = {
+  easy: "悠闲",
+  normal: "经典",
+  hard: "极限"
+};
+
+function pointToKey(point: Point) {
+  return `${point.x}-${point.y}`;
+}
+
+function randomInt(max: number) {
+  return Math.floor(Math.random() * max);
+}
+
+function createInitialSnake(): Point[] {
+  const center = Math.floor(BOARD_SIZE / 2);
+  return [
+    { x: center, y: center },
+    { x: center - 1, y: center },
+    { x: center - 2, y: center }
+  ];
+}
+
+function isInside(point: Point) {
+  return point.x >= 0 && point.x < BOARD_SIZE && point.y >= 0 && point.y < BOARD_SIZE;
+}
+
+function createObstacles(level: number, occupied: Set<string>) {
+  const count = Math.min(level + 2, 18);
+  const obstacles = new Set<string>();
+
+  while (obstacles.size < count) {
+    const point = { x: randomInt(BOARD_SIZE), y: randomInt(BOARD_SIZE) };
+    const key = pointToKey(point);
+    if (occupied.has(key) || obstacles.has(key)) continue;
+    // 保留中央出生区域
+    const center = BOARD_SIZE / 2;
+    if (Math.abs(point.x - center) <= 3 && Math.abs(point.y - center) <= 3) continue;
+    obstacles.add(key);
+  }
+
+  return obstacles;
+}
+
+function createFood(occupied: Set<string>, allowBonus = true): Food {
+  let next: Point = { x: 0, y: 0 };
+  do {
+    next = { x: randomInt(BOARD_SIZE), y: randomInt(BOARD_SIZE) };
+  } while (occupied.has(pointToKey(next)));
+
+  if (allowBonus && Math.random() < BONUS_FOOD_CHANCE) {
+    return {
+      position: next,
+      kind: "bonus",
+      expiresAt: Date.now() + BONUS_FOOD_LIFETIME_MS
+    };
+  }
+
+  return { position: next, kind: "normal" };
+}
+
+export default function SnakeGamePage() {
+  const [snake, setSnake] = useState<Point[]>(createInitialSnake);
+  const [direction, setDirection] = useState<Direction>("right");
+  const [queuedDirection, setQueuedDirection] = useState<Direction>("right");
+  const [status, setStatus] = useState<GameStatus>("ready");
+  const [mode, setMode] = useState<Mode>("classic");
+  const [difficulty, setDifficulty] = useState<Difficulty>("normal");
+  const [food, setFood] = useState<Food>(() => {
+    const occupied = new Set(createInitialSnake().map(pointToKey));
+    return createFood(occupied);
+  });
+  const [obstacles, setObstacles] = useState<Set<string>>(new Set());
+  const [score, setScore] = useState(0);
+  const [bestScore, setBestScore] = useState(0);
+  const [level, setLevel] = useState(1);
+  const [combo, setCombo] = useState(1);
+  const [recordTable, setRecordTable] = useState<number[]>([]);
+
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            entry.target.classList.add("in-view");
-          }
-        });
-      },
-      { threshold: 0.25 }
-    );
-
-    integrationRef.current.forEach((el) => {
-      if (el) observer.observe(el);
-    });
-
-    return () => observer.disconnect();
+    const storedBest = Number(localStorage.getItem("snake-best-score") || "0");
+    setBestScore(storedBest);
+    const records = JSON.parse(localStorage.getItem("snake-records") || "[]") as number[];
+    setRecordTable(records);
   }, []);
 
-  const price = isYearly ? 32 : 39;
+  const occupiedCells = useMemo(() => {
+    const set = new Set<string>();
+    snake.forEach((segment) => set.add(pointToKey(segment)));
+    obstacles.forEach((block) => set.add(block));
+    return set;
+  }, [snake, obstacles]);
+
+  const resetGame = useCallback(() => {
+    const initialSnake = createInitialSnake();
+    const snakeSet = new Set(initialSnake.map(pointToKey));
+    setSnake(initialSnake);
+    setDirection("right");
+    setQueuedDirection("right");
+    setStatus("ready");
+    setScore(0);
+    setLevel(1);
+    setCombo(1);
+    const obstacleSet = createObstacles(1, snakeSet);
+    setObstacles(obstacleSet);
+    const mergedOccupied = new Set([...snakeSet, ...obstacleSet]);
+    setFood(createFood(mergedOccupied));
+  }, []);
+
+  useEffect(() => {
+    resetGame();
+  }, [resetGame, mode, difficulty]);
+
+  const finishGame = useCallback(() => {
+    setStatus("gameover");
+    setBestScore((prev) => {
+      const next = Math.max(prev, score);
+      localStorage.setItem("snake-best-score", String(next));
+      return next;
+    });
+    setRecordTable((prev) => {
+      const merged = [...prev, score].sort((a, b) => b - a).slice(0, 5);
+      localStorage.setItem("snake-records", JSON.stringify(merged));
+      return merged;
+    });
+  }, [score]);
+
+  const gameTick = useCallback(() => {
+    setSnake((currentSnake) => {
+      const nextDirection = queuedDirection;
+      setDirection(nextDirection);
+
+      const head = currentSnake[0];
+      const step = DIRECTION_STEP[nextDirection];
+      let nextHead: Point = { x: head.x + step.x, y: head.y + step.y };
+
+      if (mode === "wrap") {
+        nextHead = {
+          x: (nextHead.x + BOARD_SIZE) % BOARD_SIZE,
+          y: (nextHead.y + BOARD_SIZE) % BOARD_SIZE
+        };
+      }
+
+      if (mode === "classic" && !isInside(nextHead)) {
+        finishGame();
+        return currentSnake;
+      }
+
+      const headKey = pointToKey(nextHead);
+      const tail = currentSnake[currentSnake.length - 1];
+      const tailKey = pointToKey(tail);
+      const bodySet = new Set(currentSnake.map(pointToKey));
+      bodySet.delete(tailKey);
+
+      if (bodySet.has(headKey) || obstacles.has(headKey)) {
+        finishGame();
+        return currentSnake;
+      }
+
+      const ateFood = headKey === pointToKey(food.position);
+      const grownSnake = [nextHead, ...currentSnake];
+      if (!ateFood) {
+        grownSnake.pop();
+      }
+
+      if (ateFood) {
+        const plus = food.kind === "bonus" ? BONUS_POINTS * combo : BASE_POINTS * combo;
+        const nextScore = score + plus;
+        const nextLevel = Math.floor(nextScore / (LEVEL_UP_STEP * BASE_POINTS)) + 1;
+
+        setScore(nextScore);
+        setLevel(nextLevel);
+        setCombo((prev) => Math.min(prev + 1, 6));
+
+        const nextSnakeSet = new Set(grownSnake.map(pointToKey));
+        const nextObstacles = createObstacles(nextLevel, nextSnakeSet);
+        setObstacles(nextObstacles);
+        const nextOccupied = new Set([...nextSnakeSet, ...nextObstacles]);
+        setFood(createFood(nextOccupied));
+      } else {
+        setCombo(1);
+      }
+
+      return grownSnake;
+    });
+  }, [queuedDirection, mode, obstacles, food, finishGame, score, combo]);
+
+  useEffect(() => {
+    if (status !== "running") return;
+
+    const speedUp = Math.max(35, TICK_BY_DIFFICULTY[difficulty] - (level - 1) * 3);
+    timerRef.current = setInterval(gameTick, speedUp);
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [status, gameTick, difficulty, level]);
+
+  useEffect(() => {
+    if (food.kind === "bonus" && food.expiresAt && Date.now() > food.expiresAt) {
+      setFood(createFood(occupiedCells, false));
+    }
+
+    const interval = setInterval(() => {
+      if (food.kind === "bonus" && food.expiresAt && Date.now() > food.expiresAt) {
+        setFood(createFood(occupiedCells, false));
+      }
+    }, 300);
+
+    return () => clearInterval(interval);
+  }, [food, occupiedCells]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const keyMap: Record<string, Direction> = {
+        ArrowUp: "up",
+        ArrowDown: "down",
+        ArrowLeft: "left",
+        ArrowRight: "right",
+        w: "up",
+        s: "down",
+        a: "left",
+        d: "right"
+      };
+
+      const next = keyMap[event.key];
+      if (!next) {
+        if (event.key === " " && status !== "gameover") {
+          setStatus((prev) => (prev === "running" ? "paused" : "running"));
+        }
+        return;
+      }
+
+      event.preventDefault();
+      setQueuedDirection((prev) => {
+        const current = status === "running" ? prev : direction;
+        if (OPPOSITE_DIRECTION[current] === next) return current;
+        return next;
+      });
+
+      if (status === "ready" || status === "paused") setStatus("running");
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [status, direction]);
+
+  const foodKey = pointToKey(food.position);
+  const snakeSet = useMemo(() => new Set(snake.map(pointToKey)), [snake]);
+
+  const bonusCountdown =
+    food.kind === "bonus" && food.expiresAt ? Math.max(0, Math.ceil((food.expiresAt - Date.now()) / 1000)) : null;
 
   return (
-    <main className="relative soft-layer px-5 py-10 md:px-10">
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-8">
-        <section className="glass rounded-3xl p-8 md:p-12" aria-labelledby="hero-title">
-          <h1 id="hero-title" className="text-4xl font-semibold tracking-tight md:text-5xl">
-            用自动化报告，把分析时间还给增长团队
-          </h1>
-          <p className="mt-4 max-w-2xl text-lg text-slate-700">
-            InsightFlow 将分散数据整合成可执行洞察，帮助你更快做出增长决策。
-          </p>
-          <form className="mt-6 flex flex-col gap-3 sm:flex-row" aria-label="邮箱收集表单">
-            <label htmlFor="email" className="sr-only">
-              电子邮箱
-            </label>
-            <input
-              id="email"
-              type="email"
-              required
-              placeholder="输入你的工作邮箱"
-              className="focus-ring btn-rounded w-full border border-white/80 bg-white/70 px-4 py-3"
-            />
-            <button type="submit" className="focus-ring btn-rounded bg-[#355cff] px-5 py-3 font-medium text-white">
-              免费试用
-            </button>
-          </form>
-        </section>
+    <main className="snake-page">
+      <section className="panel">
+        <header className="topbar">
+          <h1>霓虹贪吃蛇 · 挑战版</h1>
+          <p>方向键/WASD 控制，空格暂停。吃得越快，速度越快！</p>
+        </header>
 
-        <section aria-labelledby="reports-title">
-          <h2 id="reports-title" className="mb-4 text-2xl font-semibold">
-            示例报告
-          </h2>
-          <div className="grid gap-4 md:grid-cols-2">
-            {reportCards.map((item) => (
-              <article key={item.title} className="glass rounded-2xl p-5">
-                <h3 className="text-lg font-semibold">{item.title}</h3>
-                <p className="mt-2 text-slate-700">{item.desc}</p>
-              </article>
-            ))}
+        <div className="stats">
+          <div>
+            <span>分数</span>
+            <strong>{score}</strong>
           </div>
-        </section>
-
-        <section aria-labelledby="integration-title">
-          <h2 id="integration-title" className="mb-4 text-2xl font-semibold">
-            集成生态
-          </h2>
-          <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
-            {integrations.map((name, idx) => (
-              <div
-                key={name}
-                ref={(el) => {
-                  integrationRef.current[idx] = el;
-                }}
-                className="integration-card glass rounded-2xl p-5"
-              >
-                <h3 className="text-lg font-medium">{name}</h3>
-                <p className="mt-1 text-sm text-slate-700">无缝同步，分钟级刷新数据。</p>
-              </div>
-            ))}
+          <div>
+            <span>历史最高</span>
+            <strong>{bestScore}</strong>
           </div>
-        </section>
+          <div>
+            <span>等级</span>
+            <strong>{level}</strong>
+          </div>
+          <div>
+            <span>连击</span>
+            <strong>x{combo}</strong>
+          </div>
+        </div>
 
-        <section className="glass rounded-3xl p-6" aria-labelledby="testimonial-title">
-          <h2 id="testimonial-title" className="text-2xl font-semibold">
-            客户评价
-          </h2>
-          <div
-            className="mt-4"
-            role="region"
-            aria-label="客户评价轮播"
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === "ArrowRight") setSlide((prev) => (prev + 1) % testimonials.length);
-              if (e.key === "ArrowLeft") setSlide((prev) => (prev - 1 + testimonials.length) % testimonials.length);
-            }}
-          >
-            <blockquote className="text-lg">“{testimonials[slide].quote}”</blockquote>
-            <p className="mt-3 text-sm text-slate-700">
-              {testimonials[slide].name} · {testimonials[slide].role}
-            </p>
-            <div className="mt-4 flex gap-2">
-              <button
-                className="focus-ring btn-rounded border border-slate-300 bg-white/70 px-3 py-2"
-                onClick={() => setSlide((prev) => (prev - 1 + testimonials.length) % testimonials.length)}
-                aria-label="上一条评价"
-              >
-                ←
-              </button>
-              <button
-                className="focus-ring btn-rounded border border-slate-300 bg-white/70 px-3 py-2"
-                onClick={() => setSlide((prev) => (prev + 1) % testimonials.length)}
-                aria-label="下一条评价"
-              >
-                →
-              </button>
-            </div>
-            <ul className="sr-only" aria-label="客户评价静态列表备选">
-              {testimonials.map((t) => (
-                <li key={t.name}>{`${t.name}: ${t.quote}`}</li>
+        <div className="controls-row">
+          <label>
+            难度
+            <select value={difficulty} onChange={(e) => setDifficulty(e.target.value as Difficulty)}>
+              {Object.keys(TICK_BY_DIFFICULTY).map((item) => (
+                <option key={item} value={item}>
+                  {DIFFICULTY_LABEL[item as Difficulty]}
+                </option>
               ))}
-            </ul>
-          </div>
-        </section>
+            </select>
+          </label>
+          <label>
+            模式
+            <select value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
+              <option value="classic">经典穿墙禁用</option>
+              <option value="wrap">穿墙模式</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={() => setStatus((prev) => (prev === "running" ? "paused" : "running"))}
+            disabled={status === "gameover"}
+          >
+            {status === "running" ? "暂停" : "开始 / 继续"}
+          </button>
+          <button type="button" onClick={resetGame}>
+            重开
+          </button>
+        </div>
 
-        <section className="glass rounded-3xl p-6" aria-labelledby="pricing-title">
-          <h2 id="pricing-title" className="text-2xl font-semibold">
-            透明定价
-          </h2>
-          <div className="mt-4 inline-flex rounded-2xl border border-white/80 bg-white/60 p-1">
-            <button
-              className={`focus-ring btn-rounded px-4 py-2 ${!isYearly ? "bg-[#355cff] text-white" : "text-slate-700"}`}
-              aria-pressed={!isYearly}
-              onClick={() => setIsYearly(false)}
-            >
-              月付
-            </button>
-            <button
-              className={`focus-ring btn-rounded px-4 py-2 ${isYearly ? "bg-[#355cff] text-white" : "text-slate-700"}`}
-              aria-pressed={isYearly}
-              onClick={() => setIsYearly(true)}
-            >
-              年付（省18%）
-            </button>
-          </div>
-          <p className="mt-5 text-4xl font-semibold">¥{price}</p>
-          <p className="text-slate-700">每席位 / 月，含无限仪表板与自动洞察建议。</p>
-        </section>
+        {food.kind === "bonus" && bonusCountdown !== null && <p className="bonus-tip">⭐ 奖励食物倒计时：{bonusCountdown}s</p>}
 
-        <section className="glass rounded-3xl p-6" aria-labelledby="faq-title">
-          <h2 id="faq-title" className="text-2xl font-semibold">
-            常见问题
-          </h2>
-          <div className="mt-4 space-y-3">
-            {faq.map((item) => (
-              <details key={item.q} className="btn-rounded border border-white/90 bg-white/65 p-4">
-                <summary className="cursor-pointer font-medium">{item.q}</summary>
-                <p className="mt-2 text-slate-700">{item.a}</p>
-              </details>
+        <div className="board" role="img" aria-label="贪吃蛇棋盘">
+          {Array.from({ length: BOARD_SIZE * BOARD_SIZE }).map((_, index) => {
+            const x = index % BOARD_SIZE;
+            const y = Math.floor(index / BOARD_SIZE);
+            const key = `${x}-${y}`;
+            const isHead = key === pointToKey(snake[0]);
+            const isSnake = snakeSet.has(key);
+            const isFood = key === foodKey;
+            const isObstacle = obstacles.has(key);
+
+            let className = "cell";
+            if (isObstacle) className += " obstacle";
+            if (isSnake) className += isHead ? " snake-head" : " snake-body";
+            if (isFood) className += food.kind === "bonus" ? " bonus-food" : " food";
+
+            return <div key={key} className={className} />;
+          })}
+        </div>
+
+        <div className="mobile-pad" aria-hidden>
+          <button onClick={() => setQueuedDirection("up")}>↑</button>
+          <div>
+            <button onClick={() => setQueuedDirection("left")}>←</button>
+            <button onClick={() => setQueuedDirection("down")}>↓</button>
+            <button onClick={() => setQueuedDirection("right")}>→</button>
+          </div>
+        </div>
+
+        <footer className="footer-info">
+          <p>状态：{status === "gameover" ? "游戏结束" : status === "running" ? "进行中" : status === "paused" ? "已暂停" : "待开始"}</p>
+          <ol>
+            {recordTable.map((item, idx) => (
+              <li key={`${item}-${idx}`}>Top {idx + 1}：{item}</li>
             ))}
-          </div>
-        </section>
-
-        <footer className="py-8 text-center text-sm text-slate-700">© {new Date().getFullYear()} InsightFlow. All rights reserved.</footer>
-      </div>
+          </ol>
+        </footer>
+      </section>
     </main>
   );
 }
