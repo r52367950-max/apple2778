@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: light;
+  color-scheme: dark;
 }
 
 * {
@@ -13,43 +13,188 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: linear-gradient(160deg, #ebe4ff 0%, #d7e3ff 44%, #cde9ff 100%);
-  color: #1d2240;
+  font-family: "Inter", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: radial-gradient(circle at 20% 20%, #1d345f 0%, #0b152a 50%, #060b18 100%);
+  color: #e9f4ff;
 }
 
-.glass {
-  background: rgba(255, 255, 255, 0.55);
-  border: 1px solid rgba(255, 255, 255, 0.7);
-  box-shadow: 0 10px 35px rgba(83, 92, 191, 0.18);
-  backdrop-filter: blur(14px);
+.snake-page {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 24px;
 }
 
-.soft-layer::before {
-  content: "";
-  position: absolute;
-  inset: -10%;
-  z-index: -1;
-  background: radial-gradient(circle at top, rgba(161, 120, 255, 0.25), transparent 44%),
-    radial-gradient(circle at bottom right, rgba(92, 185, 255, 0.22), transparent 40%);
-  filter: blur(26px);
+.panel {
+  width: min(1100px, 100%);
+  border: 1px solid rgba(129, 210, 255, 0.35);
+  border-radius: 24px;
+  background: rgba(9, 22, 44, 0.78);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+  padding: 22px;
 }
 
-.focus-ring:focus-visible {
-  outline: 2px solid #355cff;
-  outline-offset: 2px;
+.topbar h1 {
+  margin: 0;
+  font-size: clamp(1.7rem, 3vw, 2.35rem);
 }
 
-.btn-rounded {
+.topbar p {
+  margin: 6px 0 16px;
+  color: #9cc7e8;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.stats div {
+  background: rgba(22, 46, 87, 0.8);
+  border: 1px solid rgba(95, 194, 255, 0.28);
   border-radius: 14px;
+  padding: 10px;
 }
 
-.integration-card {
-  opacity: 0;
-  transform: translateY(20px);
-  transition: opacity 0.45s ease, transform 0.45s ease;
+.stats span {
+  display: block;
+  color: #94bddb;
+  font-size: 0.82rem;
 }
 
-.integration-card.in-view {
-  opacity: 1;
-  transform: translateY(0);
+.stats strong {
+  font-size: 1.3rem;
+}
+
+.controls-row {
+  margin: 14px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+}
+
+.controls-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.9rem;
+}
+
+select,
+button {
+  border-radius: 10px;
+  border: 1px solid rgba(120, 185, 223, 0.45);
+  background: #10274a;
+  color: #d9eeff;
+  padding: 8px 12px;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.bonus-tip {
+  margin: 8px 0;
+  color: #ffd966;
+  font-weight: 600;
+}
+
+.board {
+  margin-top: 12px;
+  background: #0a1b38;
+  border: 1px solid rgba(80, 194, 255, 0.45);
+  border-radius: 14px;
+  padding: 8px;
+  display: grid;
+  grid-template-columns: repeat(24, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.cell {
+  aspect-ratio: 1;
+  border-radius: 3px;
+  background: #11294e;
+}
+
+.snake-body {
+  background: #4fd8a4;
+}
+
+.snake-head {
+  background: #7dffea;
+  box-shadow: 0 0 8px rgba(125, 255, 234, 0.9);
+}
+
+.food {
+  background: #ff8157;
+  box-shadow: 0 0 8px rgba(255, 129, 87, 0.75);
+}
+
+.bonus-food {
+  background: #ffe27d;
+  animation: pulse 1s infinite ease-in-out;
+}
+
+.obstacle {
+  background: #4f6689;
+}
+
+.mobile-pad {
+  margin-top: 14px;
+  display: none;
+  gap: 8px;
+}
+
+.mobile-pad button {
+  min-width: 44px;
+}
+
+.footer-info {
+  margin-top: 12px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  color: #9ac0dc;
+}
+
+.footer-info ol {
+  margin: 0;
+  padding-left: 16px;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 6px rgba(255, 232, 143, 0.6);
+  }
+  50% {
+    transform: scale(1.1);
+    box-shadow: 0 0 12px rgba(255, 232, 143, 1);
+  }
+}
+
+@media (max-width: 900px) {
+  .stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mobile-pad {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .footer-info {
+    flex-direction: column;
+  }
 }
