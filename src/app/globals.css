@@ -1,0 +1,55 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: linear-gradient(160deg, #ebe4ff 0%, #d7e3ff 44%, #cde9ff 100%);
+  color: #1d2240;
+}
+
+.glass {
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow: 0 10px 35px rgba(83, 92, 191, 0.18);
+  backdrop-filter: blur(14px);
+}
+
+.soft-layer::before {
+  content: "";
+  position: absolute;
+  inset: -10%;
+  z-index: -1;
+  background: radial-gradient(circle at top, rgba(161, 120, 255, 0.25), transparent 44%),
+    radial-gradient(circle at bottom right, rgba(92, 185, 255, 0.22), transparent 40%);
+  filter: blur(26px);
+}
+
+.focus-ring:focus-visible {
+  outline: 2px solid #355cff;
+  outline-offset: 2px;
+}
+
+.btn-rounded {
+  border-radius: 14px;
+}
+
+.integration-card {
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.45s ease, transform 0.45s ease;
+}
+
+.integration-card.in-view {
+  opacity: 1;
+  transform: translateY(0);
+}
